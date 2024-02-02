@@ -10,11 +10,12 @@ from scipy.signal import savgol_filter
 
 from sklearn.model_selection import train_test_split, StratifiedKFold
 import glob
-import ast
 
-from scipy.signal import savgol_filter, butter, filtfilt
+from scipy.signal import savgol_filter, filtfilt
 from tqdm import tqdm
 from imblearn.over_sampling import SMOTE, ADASYN
+
+from utils import get_ptbxl_database, ptbxl_to_numpy
 
 
 class CVConditional(Dataset):
@@ -34,6 +35,8 @@ class CVConditional(Dataset):
 
         if not os.path.exists(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}"):
             # Get classes
+            if not os.path.isfile(data_path+"thirdparty/ptbxl_classes.csv"):
+                get_ptbxl_database(data_path)
             df_classes = pd.read_csv(data_path+"thirdparty/ptbxl_classes.csv")
             df_classes.rename(columns={"filename_hr": "record_name"}, inplace=True)
             stats = pd.read_csv(data_path+"thirdparty/scp_statements.csv")
