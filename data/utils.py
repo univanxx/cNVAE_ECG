@@ -2,16 +2,16 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import pickle
-import glob
+from glob import glob
 import wfdb
 import ast
 
 
-def get_ptbxl_database(data_path):
+def get_ptbxl_database(data_path, ptbxl_path):
     import warnings
     warnings.simplefilter(action='ignore', category=FutureWarning)
     # Loading and preparing ptbxl_database.csv
-    ptbxl_df = pd.read_csv(data_path + "ptbxl_database.csv")
+    ptbxl_df = pd.read_csv(ptbxl_path + "ptbxl_database.csv")
     ptbxl_df = ptbxl_df[['scp_codes', 'filename_hr', 'age', 'sex', 'height', 'weight', 'device', 'strat_fold', 'static_noise', 'burst_noise']]
     ptbxl_df['filename_hr'] = ptbxl_df['filename_hr'].apply(lambda x: x[x.rfind('/')+1:])
     ptbxl_df["scp_codes"] = ptbxl_df["scp_codes"].apply(lambda x: ast.literal_eval(x))
@@ -30,7 +30,7 @@ def get_ptbxl_database(data_path):
             else:
                 res[key].append(0)
     # Adding other diagnoses
-    scp_statements = pd.read_csv(data_path + "scp_statements.csv") 
+    scp_statements = pd.read_csv(ptbxl_path + "scp_statements.csv") 
     for key in scp_statements.iloc[:,0].values:
         if key not in res.keys():
             res[key] = [0] * ptbxl_df.shape[0]
@@ -41,19 +41,19 @@ def get_ptbxl_database(data_path):
 
 
 def load_wsdb(file):
-    record = wfdb.io.rdrecord(file.rstrip('.mat'))
-    ecg = record.p_signal.T.astype('float32')
-    leads = np.array(record.sig_name)
-    sr = record.fs
+    signals, fields = wfdb.rdsamp(file.rstrip('.dat'))
+    ecg = signals.T.astype('float32')
+    leads = np.array(fields["sig_name"])
+    sr = fields["fs"]
     ecg[np.isnan(ecg)] = 0.0
     return ecg, leads, sr
 
 
 ##### Uploading PTB-XL to numpy format #####
 def ptbxl_to_numpy(data_path, ptbxl_path):
-    data_name = 'WFDB_PTBXL/WFDB_PTBXL'
+    data_name = 'records500'
     # Loading an ECG and combining it into a dictionary
-    dataset = sorted(glob(f'{ptbxl_path}/{data_name}/*.mat'))
+    dataset = sorted(glob(f'{ptbxl_path}{data_name}/*/*.dat'))
     ptbxl = {}
     # The process of filling the dictionary
     pbar = tqdm(total=len(dataset))

@@ -20,26 +20,25 @@ from utils import get_ptbxl_database, ptbxl_to_numpy
 
 class CVConditional(Dataset):
     def __init__(self, diag_name, size, fold, data_path, 
-                 option='train', type="gan", num_folds=5, seed=23, p=0.5, smooth=False, filter=False, aug=None):
+                 option='train', type="gan_sample", num_folds=5, seed=23, p=0.5, smooth=False, filter=False, ptbxl_path=None):
 
         self.p = p
         self.option = option
         assert type in ["gan_sample", "gan_no_sample", "classify", "gan_equal"]
-        assert aug in [None, "smote", "adasyn", "rand_over", "focal"]
         self.type = type
         self.size = size
         self.fold = fold
         self.smooth = smooth
-        self.aug = aug
         self.filtered = "filtered" if filter else ''
 
+        os.makedirs(data_path + "thirdparty", exist_ok=True)
         if not os.path.exists(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}"):
             # Get classes
             if not os.path.isfile(data_path+"thirdparty/ptbxl_classes.csv"):
-                get_ptbxl_database(data_path)
+                get_ptbxl_database(data_path, ptbxl_path)
             df_classes = pd.read_csv(data_path+"thirdparty/ptbxl_classes.csv")
             df_classes.rename(columns={"filename_hr": "record_name"}, inplace=True)
-            stats = pd.read_csv(data_path+"thirdparty/scp_statements.csv")
+            stats = pd.read_csv(ptbxl_path+"scp_statements.csv")
             names = dict(zip(stats.iloc[:,1], stats.iloc[:,5]))
             df = df_classes.rename(columns=names)  
             res = df.loc[:,diag_name].sum(axis=1) > 0
@@ -49,10 +48,12 @@ class CVConditional(Dataset):
             # Get values
             self.data = {}
             ### This file should be a dictionary with paient_id as key value and numpy aray with raw signal as value 
+            if not os.path.isfile(data_path+"thirdparty/ptbxl.pickle"):
+                ptbxl_to_numpy(data_path, ptbxl_path)
             with open(data_path+"thirdparty/ptbxl.pickle", "rb") as f:
                 self.data = pickle.load(f)
-            values = np.array(list(self.data.values()))
 
+            values = np.array(list(self.data.values()))
             values_mod = []
             # filtering
             for file_i in tqdm(values, desc="Filtering signals"):
@@ -67,7 +68,7 @@ class CVConditional(Dataset):
             values = np.array(values_mod)
 
             self.res_min, self.res_max = [], []
-            for ax in [0,2,6,7,8,9,10,11]:
+            for ax in tqdm([0,2,6,7,8,9,10,11]):
                 self.res_min.append(np.percentile(values[:,ax,:].min(axis=1), 5))
                 self.res_max.append(np.percentile(values[:,ax,:].max(axis=1), 95))
             self.res_min = np.array(self.res_min)[None, :, None]
@@ -162,29 +163,12 @@ class CVConditional(Dataset):
             np.random.seed(seed)
             np.random.shuffle(self.labels)
 
-        # AUGMENTATIONS #
-        if self.aug == "smote":
-            sm = SMOTE(random_state=seed)
-            orig_shape = self.data_prepared.shape
-            data_prepared = np.reshape(self.data_prepared, (self.data_prepared.shape[0], self.data_prepared.shape[1]*self.data_prepared.shape[2]))
-            X_res, self.labels = sm.fit_resample(data_prepared, self.labels)
-            self.data_prepared = np.reshape(X_res, (X_res.shape[0], orig_shape[1], orig_shape[2]))
-        elif self.aug == "adasyn":
-            sm = ADASYN(random_state=seed)
-            orig_shape = self.data_prepared.shape
-            data_prepared = np.reshape(self.data_prepared, (self.data_prepared.shape[0], self.data_prepared.shape[1]*self.data_prepared.shape[2]))
-            X_res, self.labels = sm.fit_resample(data_prepared, self.labels)
-            self.data_prepared = np.reshape(X_res, (X_res.shape[0], orig_shape[1], orig_shape[2]))
-
     def __len__(self):
-        if self.aug != "rand_over":
-            return self.data_prepared.shape[0]
-        else:
-            return self.data_prepared.shape[0]*2
+        return self.data_prepared.shape[0]
 
     def __getitem__(self, index):
             
-            if self.type == "gan_sample" or self.aug == "rand_over":
+            if self.type == "gan_sample":
                 class_i = np.random.choice(2, 1, p=[self.p, 1-self.p])[0]
                 if class_i == 1:
                     idx = np.random.choice(self.labels.nonzero()[0], 1)[0]
