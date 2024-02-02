@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from neural_operations_1d import OPS, EncCombinerCell, DecCombinerCell, Conv1D, get_skip_connection, SE
 
 from utils import get_stride_for_cell_type, groups_per_scale
-from distributions import Normal, DiscMixLogistic1D, NormalDecoder, DiscMixEightLogistic1D
+from distributions import Normal, DiscMixEightLogistic1D
 
 CHANNEL_MULT = 2
 

@@ -43,13 +43,9 @@ def main(args):
     else:
         stype = "gan_no_sample"
         
-    if args.fold_idx == -1:
-        raise NotImplementedError
-        train_dataset = PTBXLConditional(args.class_name, option="train", size=args.input_size // 10)
-        valid_dataset = PTBXLConditional(args.class_name, option="val", size=args.input_size // 10) 
-    else:
-        train_dataset = CVConditional(args.class_name, args.input_size // 10, args.fold_idx, args.data_dir, type=stype, option="train",smooth=args.smooth, filter=args.filter)
-        valid_dataset = CVConditional(args.class_name, args.input_size // 10, args.fold_idx, args.data_dir, type=stype, option="val",smooth=args.smooth, filter=args.filter) 
+
+    train_dataset = CVConditional(args.class_name, args.input_size // 10, args.fold_idx, args.data_dir, type=stype, option="train",smooth=args.smooth, filter=args.filter)
+    valid_dataset = CVConditional(args.class_name, args.input_size // 10, args.fold_idx, args.data_dir, type=stype, option="val",smooth=args.smooth, filter=args.filter) 
 
         
     print(len(train_dataset), train_dataset.type, train_dataset.labels.sum(), train_dataset.labels.shape[0] - train_dataset.labels.sum())
@@ -431,8 +427,6 @@ if __name__ == '__main__':
                     help='fold id in kfold cross-val')
     parser.add_argument('--name', type=str, required=True,
                     help='exp name')
-    parser.add_argument('--dataset', type=str, required=True,
-                    help='dataset name')
     parser.add_argument('--smooth', action='store_true', default=False,
                     help='use smoothing?')
     parser.add_argument('--filter', action='store_true', default=False,
