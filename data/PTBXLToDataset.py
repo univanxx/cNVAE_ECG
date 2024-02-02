@@ -15,7 +15,9 @@ from scipy.signal import savgol_filter, filtfilt
 from tqdm import tqdm
 from imblearn.over_sampling import SMOTE, ADASYN
 
-from utils import get_ptbxl_database, ptbxl_to_numpy
+import sys
+sys.path.insert(0, "../data/")
+from data_utils import get_ptbxl_database, ptbxl_to_numpy
 
 
 class CVConditional(Dataset):
@@ -187,7 +189,6 @@ class CVConditional(Dataset):
                 sample = (sample - self.res_min.squeeze(axis=0)) / (self.res_max.squeeze(axis=0) - self.res_min.squeeze(axis=0))
                 sample[sample > 1] = 1
                 sample[sample < 0] = 0
-                sample = self.get_12_from_8(sample[None,:,:])[0]
             
             return torch.from_numpy(sample).float(), torch.tensor(class_i).long()
             
