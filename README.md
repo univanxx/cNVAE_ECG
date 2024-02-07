@@ -1,5 +1,11 @@
 # Code for the "Multi-Aspect ECG Generation Using Hierarchical Variational Autoencoders" Paper
 
+cNVAE-ECG is a model based on [NVAE](https://github.com/NVlabs/NVAE) for conditional generation of 12 main-lead ECG signals longer than one heartbeat or _multi-aspect_ ECGs.
+
+<p align="center">
+    <img src="img/cNVAE-ECG.png" width="550">
+</p>
+
 #### To train cNVAE-ECG model:
 0. Download [PTB-XL dataset](https://physionet.org/content/ptb-xl/1.0.3/);
 1. Install dependencies from the ```requirements.txt``` file;
