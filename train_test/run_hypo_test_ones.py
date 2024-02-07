@@ -57,7 +57,6 @@ if __name__ == "__main__":
                             orig_test_ds, args.res_path, cuda_id=args.device)
         test_res = trainer.train(args.num_epochs)
         results[i] = test_res
-        print(test_res)
 
-        with open(f"./results_ones_{args.model_type}_{args.model_name}_fold_{args.fold}_seed_{args.seed}.json", 'w') as f:
-            json.dump(results, f)
+    with open(f"./results_ones_{args.model_type}_{args.model_name}_fold_{args.fold}_seed_{args.seed}.json", 'w') as f:
+        json.dump(results, f)

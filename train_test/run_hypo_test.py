@@ -62,38 +62,6 @@ if __name__ == "__main__":
                             orig_test_ds, args.res_path, cuda_id=args.device)
         test_res = trainer.train(args.num_epochs)
         results[i] = test_res
-        print(test_res)
-        if i == 0:
-            print("Working with gan test")
-            if args.model_type == "nvae":
-                gen_test_ds = CVGenerated("MI", args.model_name, 2560 // 10, args.fold, args.data_path, args.generated_path, 
-                        option='test', seed=args.seed)
-            else:
-                gen_test_ds = CVGeneratedGans("MI", 2560 // 10, args.fold, args.data_path, 
-                        args.generated_path, args.model_type, option='test', seed=args.seed)
-            model = xresnet1d101(input_channels=12, num_classes=1)
-            opt = optim.AdamW(model.parameters(), lr=1.23e-02, weight_decay=1e-2)
-            trainer = CNN1dTrainer(args.model_name+"_gan_test", model, opt, torch.nn.BCEWithLogitsLoss(), train_ds, orig_val_ds, 
-                                gen_test_ds, args.res_path, cuda_id=args.device)
-            test_res = trainer.train(args.num_epochs)
-            results["gan_test"] = test_res
-        elif i == 1.0:
-            print("Working with gan train")
-            train_ds = gen_train_ds
-            if args.model_type == "nvae":
-                gen_val_ds = CVGenerated("MI", args.model_name, 2560 // 10, args.fold, args.data_path, args.generated_path, 
-                        option='val', seed=args.seed)
-            else:
-                gen_val_ds = CVGeneratedGans("MI", 2560 // 10, args.fold, args.data_path, 
-                        args.generated_path, args.model_type, option='val', seed=args.seed)
-            model = xresnet1d101(input_channels=12, num_classes=1)
-            opt = optim.AdamW(model.parameters(), lr=1.23e-02, weight_decay=1e-2)
-            trainer = CNN1dTrainer(args.model_name+"_gan_train", model, opt, torch.nn.BCEWithLogitsLoss(), train_ds, gen_val_ds, 
-                                orig_test_ds, args.res_path, cuda_id=args.device)
-            test_res = trainer.train(args.num_epochs)
-            results["gan_train"] = test_res
-        else:
-            pass
 
-        with open(f"./results_{args.model_type}_{args.model_name}_fold_{args.fold}_seed_{args.seed}.json", 'w') as f:
-            json.dump(results, f)
+    with open(f"./results_{args.model_type}_{args.model_name}_fold_{args.fold}_seed_{args.seed}.json", 'w') as f:
+        json.dump(results, f)
