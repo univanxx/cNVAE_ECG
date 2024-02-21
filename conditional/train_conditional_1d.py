@@ -42,10 +42,16 @@ def main(args):
         stype = "gan_equal"
     else:
         stype = "gan_no_sample"
+
+
+    if args.ptbxl_path == '':
+        ptbxl_path = None
+    else:
+        ptbxl_path = args.ptbxl_path
         
 
-    train_dataset = CVConditional(args.class_name, args.input_size // 10, args.fold_idx, args.data_dir, type=stype, option="train",smooth=args.smooth, filter=args.filter)
-    valid_dataset = CVConditional(args.class_name, args.input_size // 10, args.fold_idx, args.data_dir, type=stype, option="val",smooth=args.smooth, filter=args.filter) 
+    train_dataset = CVConditional(args.class_name, args.input_size // 10, args.fold_idx, args.data_dir, type=stype, option="train",smooth=args.smooth, filter=args.filter, ptbxl_path=ptbxl_path)
+    valid_dataset = CVConditional(args.class_name, args.input_size // 10, args.fold_idx, args.data_dir, type=stype, option="val",smooth=args.smooth, filter=args.filter, ptbxl_path=ptbxl_path) 
 
         
     print(len(train_dataset), train_dataset.type, train_dataset.labels.sum(), train_dataset.labels.shape[0] - train_dataset.labels.sum())
@@ -416,13 +422,9 @@ if __name__ == '__main__':
                     help='Image input size'),
     # ECG
     parser.add_argument('--num_input_channels', type=int, default=1,
-                    help='Количество отведений ЭКГ в датасете')
-    parser.add_argument('--ecg_channel', type=int, default=0,
-                    help='Number of a specific ECG channel')
+                    help='Number of ECG leads')
     parser.add_argument('--class_name', type=str, required=True,
                     help='Class name')
-    parser.add_argument('--easy', action='store_true', default=False,
-                    help='use 2 channels instead of 3?')
     parser.add_argument('--fold_idx', type=int, default=-1,
                     help='fold id in kfold cross-val')
     parser.add_argument('--name', type=str, required=True,
@@ -435,6 +437,8 @@ if __name__ == '__main__':
                     help='use 0.5 sampling?')
     parser.add_argument('--equal', action='store_true', default=False,
                     help='use equal distribution?')
+    parser.add_argument('--ptbxl_path', type=str, default='',
+                    help='path to PTB-XL dataset')
     parser.add_argument('--focal', action='store_true', default=False,
                     help='use focal loss in ce?')
     args = parser.parse_args()

@@ -49,7 +49,6 @@ class AutoEncoder(nn.Module):
         self.focal = args.focal
         self.writer = writer
         self.arch_instance = arch_instance
-        self.easy = args.easy
         self.num_input_channels = args.num_input_channels
         self.use_se = args.use_se
         self.res_dist = args.res_dist

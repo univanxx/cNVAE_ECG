@@ -239,9 +239,9 @@ def log_iw(decoder, x, log_q, log_p, crop=False):
 
 def reconstruction_loss(decoder, x):
 
-    from distributions import DiscMixLogistic1D, DiscMixEightLogistic1D
+    from distributions import DiscMixEightLogistic1D
     recon = decoder.log_prob(x)
-    if isinstance(decoder, DiscMixLogistic1D) or isinstance(decoder, DiscMixEightLogistic1D):
+    if isinstance(decoder, DiscMixEightLogistic1D):
         return - torch.sum(recon, dim=[1])    # summation over RGB is done.
     else:
         return - torch.sum(recon, dim=[1, 2, 3])
