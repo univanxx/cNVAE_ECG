@@ -18,6 +18,7 @@ from imblearn.over_sampling import SMOTE, ADASYN
 import sys
 sys.path.insert(0, "../data/")
 from data_utils import get_ptbxl_database, ptbxl_to_numpy
+from patients_filter import patient_filtering
 
 
 class CVConditional(Dataset):
@@ -89,12 +90,15 @@ class CVConditional(Dataset):
             myo = np.array(res.loc[res.record_name.isin(good_keys),0])
             for i, (train_index, test_index) in enumerate(skf.split(good_keys, myo)):
                 os.makedirs(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold", exist_ok=True)
-                with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/train_names.npy", "wb") as f:
-                    np.save(f, good_keys[train_index])
-                with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/train_labels.npy", "wb") as f:
-                    np.save(f, myo[train_index])
+
                 names_test, names_val, labels_test, labels_val = train_test_split(good_keys[test_index], myo[test_index], 
                                                                                 test_size=0.5, random_state=seed, stratify=myo[test_index])
+                # Patient filtering
+                names_train, labels_train, names_val, labels_val, names_test, labels_test = patient_filtering(good_keys[train_index], names_val, names_test, ptbxl_path, res)
+                with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/train_names.npy", "wb") as f:
+                    np.save(f, names_train)
+                with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/train_labels.npy", "wb") as f:
+                    np.save(f, labels_train)
                 with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/val_names.npy", "wb") as f:
                     np.save(f, names_val)
                 with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/val_labels.npy", "wb") as f:
@@ -103,6 +107,7 @@ class CVConditional(Dataset):
                     np.save(f, names_test)
                 with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/test_labels.npy", "wb") as f:
                     np.save(f, labels_test)
+
         else:
             print("Found!")
 
