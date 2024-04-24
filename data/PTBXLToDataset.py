@@ -13,7 +13,7 @@ import glob
 
 from scipy.signal import savgol_filter, filtfilt
 from tqdm import tqdm
-from imblearn.over_sampling import SMOTE, ADASYN
+# from imblearn.over_sampling import SMOTE, ADASYN
 
 import sys
 sys.path.insert(0, "../data/")
@@ -22,188 +22,49 @@ from patients_filter import patient_filtering
 
 
 class CVConditional(Dataset):
-    def __init__(self, diag_name, size, fold, data_path, 
-                 option='train', type="gan_sample", num_folds=5, seed=23, p=0.5, smooth=False, filter=False, ptbxl_path=None):
+    def __init__(self, dataset_path, dataset_name,  
+                 option='train', type="generate", proportion=None, seed=23):
 
-        self.p = p
         self.option = option
-        assert type in ["gan_sample", "gan_no_sample", "classify", "gan_equal"]
+        self.proportion = proportion
+        assert type in ["generate", "classify"]
         self.type = type
-        self.size = size
-        self.fold = fold
-        self.smooth = smooth
-        self.filtered = "filtered" if filter else ''
+        
+        data_path = os.path.join(dataset_path, dataset_name)
+        os.makedirs(data_path, exist_ok=True)
+        
+        self.labels = np.load(os.path.join(data_path,  "labels.npy"))
+        self.values = np.load(os.path.join(data_path, "signals.npy"))
 
-        os.makedirs(data_path + "thirdparty", exist_ok=True)
-        if not os.path.exists(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}"):
-            # Get classes
-            if not os.path.isfile(data_path+"thirdparty/ptbxl_classes.csv"):
-                get_ptbxl_database(data_path, ptbxl_path)
-            df_classes = pd.read_csv(data_path+"thirdparty/ptbxl_classes.csv")
-            df_classes.rename(columns={"filename_hr": "record_name"}, inplace=True)
-            stats = pd.read_csv(ptbxl_path+"scp_statements.csv")
-            names = dict(zip(stats.iloc[:,1], stats.iloc[:,5]))
-            df = df_classes.rename(columns=names)  
-            res = df.loc[:,diag_name].sum(axis=1) > 0
-            res = res.to_frame().merge(df_classes["record_name"], left_index=True, right_index=True, how="inner")
-            os.makedirs(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}", exist_ok=True)
-            res.to_csv(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/{diag_name}_labels.csv", index=False)
-            # Get values
-            self.data = {}
-            ### This file should be a dictionary with paient_id as key value and numpy aray with raw signal as value 
-            if not os.path.isfile(data_path+"thirdparty/ptbxl.pickle"):
-                ptbxl_to_numpy(data_path, ptbxl_path)
-            with open(data_path+"thirdparty/ptbxl.pickle", "rb") as f:
-                self.data = pickle.load(f)
-
-            values = np.array(list(self.data.values()))
-            values_mod = []
-            # filtering
-            for file_i in tqdm(values, desc="Filtering signals"):
-                transformed_val = CVConditional.transform_frequency(file_i, self.size, 10)
-                if self.filtered != '':
-                    transformed_val = np.apply_along_axis(lambda x: filtfilt(self.b, self.a, x), axis=1, arr=transformed_val)
-                if smooth:
-                    values_mod.append(np.apply_along_axis(lambda x: savgol_filter(x, 29, 10), axis=1, arr=transformed_val))
-                else:
-                    values_mod.append(transformed_val)
-                
-            values = np.array(values_mod)
-
-            self.res_min, self.res_max = [], []
-            for ax in tqdm([0,2,6,7,8,9,10,11]):
-                self.res_min.append(np.percentile(values[:,ax,:].min(axis=1), 5))
-                self.res_max.append(np.percentile(values[:,ax,:].max(axis=1), 95))
-            self.res_min = np.array(self.res_min)[None, :, None]
-            self.res_max = np.array(self.res_max)[None, :, None]
-            np.save(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/res_min.npy", self.res_min)
-            np.save(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/res_max.npy", self.res_max)
- 
-            values = np.array(list(self.data.values()))
-            keys = np.array(list(self.data.keys()))
-            min_good = (values[:, [0,2,6,7,8,9,10,11], :] > self.res_min).all(axis=(1,2))
-            max_good = (values[:, [0,2,6,7,8,9,10,11], :] < self.res_max).all(axis=(1,2))
-            good_keys = keys[min_good & max_good]
-            good_keys = np.intersect1d(good_keys, np.array(res.record_name))
-            # CV
-            skf = StratifiedKFold(n_splits=num_folds, random_state=seed, shuffle=True)
-            myo = np.array(res.loc[res.record_name.isin(good_keys),0])
-            for i, (train_index, test_index) in enumerate(skf.split(good_keys, myo)):
-                os.makedirs(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold", exist_ok=True)
-
-                names_test, names_val, labels_test, labels_val = train_test_split(good_keys[test_index], myo[test_index], 
-                                                                                test_size=0.5, random_state=seed, stratify=myo[test_index])
-                # Patient filtering
-                names_train, labels_train, names_val, labels_val, names_test, labels_test = patient_filtering(good_keys[train_index], names_val, names_test, ptbxl_path, res)
-                with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/train_names.npy", "wb") as f:
-                    np.save(f, names_train)
-                with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/train_labels.npy", "wb") as f:
-                    np.save(f, labels_train)
-                with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/val_names.npy", "wb") as f:
-                    np.save(f, names_val)
-                with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/val_labels.npy", "wb") as f:
-                    np.save(f, labels_val)
-                with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/test_names.npy", "wb") as f:
-                    np.save(f, names_test)
-                with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(i) + "_fold" + "/test_labels.npy", "wb") as f:
-                    np.save(f, labels_test)
-
-        else:
-            print("Found!")
-
-        assert option in ["train", "val", "test"]
-        with open(data_path+"thirdparty/ptbxl.pickle", "rb") as f:
-            self.data = pickle.load(f)
-        self.res_min = np.load(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/res_min.npy")
-        self.res_max = np.load(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/res_max.npy")
-
-        if option == 'train':
-            with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(fold) + "_fold" + "/train_names.npy", "rb") as f:
-                self.names = np.load(f, allow_pickle=True)
-            self.data_prepared  = []
-            for key in tqdm(self.names, desc="Data preparing"):
-                transformed_val = CVConditional.transform_frequency(self.data[key], self.size, 10)
-                if self.filtered !='':
-                    self.data_prepared.append(np.apply_along_axis(lambda x: filtfilt(self.b, self.a, x), axis=1, arr=transformed_val))
-                else:
-                    self.data_prepared.append(transformed_val)
-            with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(str(fold)) + "_fold" + "/train_labels.npy", "rb") as f:
-                self.labels = np.load(f, allow_pickle=True)
-        elif option == 'val':
-            with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(str(fold)) + "_fold" + "/val_names.npy", "rb") as f:
-                self.names = np.load(f, allow_pickle=True)
-            with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(str(fold)) + "_fold" + "/val_labels.npy", "rb") as f:
-                self.labels = np.load(f, allow_pickle=True)
-            self.data_prepared  = []
-            for key in tqdm(self.names, desc="Data preparing"):
-                transformed_val = CVConditional.transform_frequency(self.data[key], self.size, 10)
-                if self.filtered !='':
-                    self.data_prepared.append(np.apply_along_axis(lambda x: filtfilt(self.b, self.a, x), axis=1, arr=transformed_val))
-                else:
-                    self.data_prepared.append(transformed_val)
-        elif option == 'test':
-            with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(str(fold)) + "_fold" + "/test_names.npy", "rb") as f:
-                self.names = np.load(f, allow_pickle=True)
-            with open(data_path+diag_name+f"{self.filtered}_folds_smooth_{self.smooth}/" + str(str(fold)) + "_fold" + "/test_labels.npy", "rb") as f:
-                self.labels = np.load(f, allow_pickle=True)
-            self.data_prepared  = []
-            for key in tqdm(self.names, desc="Data preparing"):
-                transformed_val = CVConditional.transform_frequency(self.data[key], self.size, 10)
-                if self.filtered !='':
-                    self.data_prepared.append(np.apply_along_axis(lambda x: filtfilt(self.b, self.a, x), axis=1, arr=transformed_val))
-                else:
-                    self.data_prepared.append(transformed_val)
+        self.res_min = np.load(os.path.join(data_path, "thirdparty", "res_min.npy"))
+        self.res_max = np.load(os.path.join(data_path, "thirdparty", "res_max.npy"))
 
         if self.type != "classify":
-            self.data_prepared = np.array(self.data_prepared)[:, [0,2,6,7,8,9,10,11], :]
+            self.values = np.array(self.values)[:, [0,2,6,7,8,9,10,11], :]
         else:
-            self.data_prepared = np.array(self.data_prepared)
+            self.values = np.array(self.values)
+            self.res_min = self.get_12_from_8(self.res_min)
+            self.res_max = self.get_12_from_8(self.res_max)
 
-        if self.type == "gan_equal":
-            pos_idx = np.where(self.labels == 1)[0]
-            neg_idx = np.where(self.labels == 0)[0]
-            neg_idx = np.random.choice(neg_idx, self.labels.sum(), replace=False)
-            self.data_prepared = self.data_prepared[np.concatenate((neg_idx, pos_idx))]
-            np.random.seed(seed)
-            np.random.shuffle(self.data_prepared)
-            self.labels = np.concatenate((np.zeros_like(neg_idx), np.ones_like(pos_idx)))
-            np.random.seed(seed)
-            np.random.shuffle(self.labels)
+        self.values = (self.values - self.res_min) / (self.res_max - self.res_min)
+        
+        self.ids = np.load(os.path.join(data_path, "thirdparty", f"{option}_ids.npy"))
+
+        self.values = self.values[self.ids,:,:]
+        self.labels = self.labels[self.ids,:]
+
+        with open(os.path.join(dataset_path, "label2id.pickle"), 'rb') as f:
+            self.label2id = pickle.load(f)
 
     def __len__(self):
-        return self.data_prepared.shape[0]
+        if self.proportion is not None:
+            return int(np.floor(self.ids.shape[0]*self.proportion))
+        else:
+            return self.ids.shape[0]
 
     def __getitem__(self, index):
+        return torch.from_numpy(self.values[index]).float(), torch.tensor(self.labels[index], dtype=bool)
             
-            if self.type == "gan_sample":
-                class_i = np.random.choice(2, 1, p=[self.p, 1-self.p])[0]
-                if class_i == 1:
-                    idx = np.random.choice(self.labels.nonzero()[0], 1)[0]
-                else:
-                    idx = np.random.choice((self.labels == 0).nonzero()[0], 1)[0]
-                class_i = self.labels[idx]
-                sample = self.data_prepared[idx]
-            else:
-                class_i = self.labels[index]
-                sample = self.data_prepared[index]
-
-            if self.smooth:
-                sample = np.apply_along_axis(lambda x: savgol_filter(x, 29, 10), axis=1, arr=sample)
-                    
-            if self.type in ["gan_sample", "gan_no_sample"]:
-                sample = (sample - self.res_min.squeeze(axis=0)) / (self.res_max.squeeze(axis=0) - self.res_min.squeeze(axis=0))
-                sample[sample > 1] = 1
-                sample[sample < 0] = 0
-            
-            return torch.from_numpy(sample).float(), torch.tensor(class_i).long()
-            
-            
-    @staticmethod
-    def transform_frequency(signal, freq, sec):
-        resized = cv2.resize(np.array(signal), (freq*sec, signal.shape[0]))
-        resized = resized.astype(signal.dtype)
-        return resized
-    
     @staticmethod
     def get_12_from_8(x):
         sec = x[:,0,:] + x[:,1,:]
@@ -211,15 +72,6 @@ class CVConditional(Dataset):
         avl = 0.5 * (x[:,0,:] - x[:,1,:])
         avf = 0.5 * (sec + x[:,1,:])
         return np.stack([x[:,0,:], sec, x[:,1,:], avr, avl, avf, x[:,2,:], x[:,3,:], x[:,4,:], x[:,5,:], x[:,6,:], x[:,7,:]], axis=1)
-    
-    @staticmethod
-    def get_norms(norms):
-        sec_norm = norms[:,0, :] + norms[:, 1, :]
-        avr_norm = -0.5 * (norms[:,0,:] + sec_norm)
-        avl_norm = 0.5 * (norms[:,0,:] - norms[:,1,:])
-        avf_norm = 0.5 * (sec_norm + norms[:,1,:])
-        return np.array([norms[:,0,:], sec_norm, norms[:,1,:], avr_norm, avl_norm, avf_norm, norms[:,2,:], norms[:,3,:], 
-                         norms[:,4,:], norms[:,5,:], norms[:,6,:], norms[:,7,:]]).transpose(1,0,2)
 
 
 class CVGenerated(Dataset):
