@@ -44,7 +44,7 @@ def encode_labels(labels, l2id):
     return labels_encoded
 
 
-def prepare_signals(output_path, dataset_name, signals, seq_len):
+def prepare_signals(output_path, dataset_name, signals, seq_len, small):
     # Signals preparing
     values = []
     for signal in tqdm(signals):
@@ -54,9 +54,14 @@ def prepare_signals(output_path, dataset_name, signals, seq_len):
     values = np.array(values)      
     # Normalization
     res_min, res_max = [], []
-    for ax in tqdm([0,2,6,7,8,9,10,11]):
-        res_min.append(np.percentile(values[:,ax,:].min(axis=1), 2.5))
-        res_max.append(np.percentile(values[:,ax,:].max(axis=1), 97.5))
+    if small == True:
+        for ax in tqdm([0,2,6,7,8,9,10,11]):
+            res_min.append(np.percentile(values[:,ax,:].min(axis=1), 5))
+            res_max.append(np.percentile(values[:,ax,:].max(axis=1), 95))
+    else:
+        for ax in tqdm([0,2,6,7,8,9,10,11]):
+            res_min.append(np.percentile(values[:,ax,:].min(axis=1), 2.5))
+            res_max.append(np.percentile(values[:,ax,:].max(axis=1), 97.5))
     res_min = np.array(res_min)[None, :, None]
     res_max = np.array(res_max)[None, :, None]
     
@@ -89,12 +94,16 @@ def split_data(data_path, values_count):
     np.save(os.path.join(data_path, "thirdparty", "val_ids.npy"), val_ids)   
 
 
-def prepare_data(dataset_path, output_path, seq_len):
+def prepare_data(dataset_path, output_path, seq_len, small):
+    if small == True:
+        output_path = os.path.join(output_path, "smaller")
+    else:
+        output_path = os.path.join(output_path, "bigger")
     heads_ptbxl, heads_georgia = np.array(glob.glob(os.path.join(dataset_path, "ptb-xl", "*/*.hea"))), np.array(glob.glob(os.path.join(dataset_path, "georgia", "*/*.hea")))
     signals_ptbxl, signals_georgia = np.array(glob.glob(os.path.join(dataset_path, "ptb-xl", "*/*.mat"))), np.array(glob.glob(os.path.join(dataset_path, "georgia", "*/*.mat")))
     # Get good signals ids
-    ids_ptbxl, signals_ptbxl = prepare_signals(output_path, "ptb-xl", signals_ptbxl, seq_len)
-    ids_georgia, signals_georgia = prepare_signals(output_path, "georgia", signals_georgia, seq_len)
+    ids_ptbxl, signals_ptbxl = prepare_signals(output_path, "ptb-xl", signals_ptbxl, seq_len, small)
+    ids_georgia, signals_georgia = prepare_signals(output_path, "georgia", signals_georgia, seq_len, small)
     np.save(os.path.join(output_path, "ptb-xl", "signals.npy"), signals_ptbxl)
     np.save(os.path.join(output_path, "georgia", "signals.npy"), signals_georgia)
     # Names filtering
@@ -132,7 +141,8 @@ if __name__ == "__main__":
     parser.add_argument('dataset_path', type=str)
     parser.add_argument('save_path', type=str)
     parser.add_argument('--input_size', type=int, default=256)
+    parser.add_argument('--small', action='store_true')
 
     args = parser.parse_args()
-    prepare_data(args.dataset_path, args.save_path, args.input_size)
+    prepare_data(args.dataset_path, args.save_path, args.input_size, args.small)
     
