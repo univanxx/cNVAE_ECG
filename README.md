@@ -1,6 +1,6 @@
-# Code for the "Multi-Aspect ECG Generation Using Hierarchical Variational Autoencoders" Paper
+# Code for the "Conditional Electrocardiogram Generation Using Hierarchical Variational Autoencoders" Paper
 
-cNVAE-ECG is a model based on [NVAE](https://github.com/NVlabs/NVAE) for conditional generation of 12 main-lead ECG signals longer than one heartbeat or _multi-aspect_ ECGs.
+cNVAE-ECG is a model based on [NVAE](https://github.com/NVlabs/NVAE) for conditional generation of 12 main-lead ECG signals longer than one heartbeat.
 
 <p align="center">
     <img src="img/cNVAE-ECG.png" width="550">
