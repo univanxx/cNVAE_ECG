@@ -17,3 +17,16 @@ cNVAE-ECG is a model based on [NVAE](https://github.com/NVlabs/NVAE) for conditi
 2. Also clone code with our conditional implementation of the [WaveGAN* and Pulse2Pulse models](https://anonymous.4open.science/r/Pulse2Pulse-5E0F/README.md) into *train_test* directory;
 3. For comparing enrichment of the entire training dataset quality, run the ```run_testing.sh``` script with specified parameters for each method;
 4. For comparing enrichment of the pathology class quality, run the ```run_testing_ones.sh``` script with specified parameters for each method.
+
+#### BibTeX reference
+```
+@misc{sviridov2025conditionalelectrocardiogramgenerationusing,
+      title={Conditional Electrocardiogram Generation Using Hierarchical Variational Autoencoders}, 
+      author={Ivan Sviridov and Konstantin Egorov},
+      year={2025},
+      eprint={2503.13469},
+      archivePrefix={arXiv},
+      primaryClass={eess.SP},
+      url={https://arxiv.org/abs/2503.13469}, 
+}
+```
