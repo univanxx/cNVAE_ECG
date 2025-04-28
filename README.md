@@ -47,3 +47,7 @@ To compare results for the transfer learning setting for the multi-label classif
       url={https://arxiv.org/abs/2503.13469}, 
 }
 ```
+
+---
+
+Thank you for your interest in our work! If you have any questions, feel free to open an issue or contact Ivan at wchhiaarid@gmail.com.
