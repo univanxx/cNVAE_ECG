@@ -9,7 +9,7 @@ cNVAE-ECG is a model based on [NVAE](https://github.com/NVlabs/NVAE) for conditi
 </p>
 
 ### To train cNVAE-ECG model:
-0. Download [PTB-XL dataset](https://physionet.org/content/ptb-xl/1.0.3/);
+0. Download [PTB-XL, Ningbo and Georgia datasets](https://physionet.org/content/challenge-2021/1.0.3/);
 1. Install dependencies from the ```requirements.txt``` file;
 2. Go to the *scripts* directory;
 3. Run ```prepare_data.sh``` script to prepare datasets;
