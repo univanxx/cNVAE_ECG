@@ -7,8 +7,8 @@ sys.path.insert(0, "../data/")
 
 
 class ECGDataset(Dataset):
-    def __init__(self, dataset_path, dataset_name, label2id, selected_classes,
-                 option='train', type="generate"):
+    def __init__(self, dataset_path, dataset_name, label2id, selected_classes, 
+                 option='train', type="generate", proportion=1.0):
 
         self.option = option
 
@@ -35,6 +35,9 @@ class ECGDataset(Dataset):
         selected = [label2id[class_i] for class_i in selected_classes]
         
         self.ids = np.load(os.path.join(data_path, "thirdparty", f"{option}_ids.npy"))
+        if proportion < 1.0:
+            self.ids = np.random.choice(self.ids, int(np.floor(self.ids.shape[0] * proportion)), replace=False)
+
         self.values = self.values[self.ids,:,:]
 
         self.labels = self.labels[self.ids, :]

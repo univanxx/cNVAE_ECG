@@ -45,31 +45,28 @@ if __name__ == "__main__":
     ptbxl_train_ds = ECGDataset(args.origin_data_path, "ptb-xl", label2id, selected_classes["ptb-xl"], type="classify", option='train')
     ptbxl_val_ds = ECGDataset(args.origin_data_path, "ptb-xl", label2id, selected_classes["ptb-xl"], type="classify", option='val')
     ptbxl_test_ds = ECGDataset(args.origin_data_path, "ptb-xl", label2id, selected_classes["ptb-xl"], type="classify", option='test')
-    
-    orig_train_ds = ECGDataset(args.origin_data_path, args.dataset_name, label2id, selected_classes[args.dataset_name], type="classify", option='train')
-    orig_val_ds = ECGDataset(args.origin_data_path, args.dataset_name, label2id, selected_classes[args.dataset_name], type="classify", option='val')
-    orig_test_ds = ECGDataset(args.origin_data_path, args.dataset_name, label2id, selected_classes[args.dataset_name], type="classify", option='test')
 
     results = {}
 
     label2id_pretrain = {k:i for i, k in enumerate(selected_classes["ptb-xl"])}
     label2id_tune = {k:i for i, k in enumerate(selected_classes[args.dataset_name])}
 
-    for i_step in np.arange(0.0, 1.1, 0.1):
+    for i_step in np.arange(0.1, 1.1, 0.1):
         # Model pretraining on PTB-XL
         i = round(i_step, 1)
         print("Working with {}".format(round(i,1)))
-        if i == 0:
-            train_ds = ptbxl_train_ds
-        else:
-            gen_train_ds = GeneratedECGDataset(os.path.join(args.origin_data_path, "ptb-xl", "labels.npy"), args.generated_data_path, args.model_type, "imbalance", label2id_pretrain, selected_classes["ptb-xl"], i)
-            train_ds = torch.utils.data.ConcatDataset([ptbxl_train_ds, gen_train_ds])
+        gen_train_ds = GeneratedECGDataset(os.path.join(args.origin_data_path, "ptb-xl", "labels.npy"), args.generated_data_path, args.model_type, "imbalance", label2id_pretrain, selected_classes["ptb-xl"], 1.0)
+        train_ds = torch.utils.data.ConcatDataset([ptbxl_train_ds, gen_train_ds])
         model = xresnet1d101(input_channels=12, num_classes=len(label2id_pretrain))
         opt = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
         trainer = CNN1dTrainer(args.model_type + '_pretrained_ptbxl_' + str(i), label2id_pretrain, model, opt, torch.nn.BCEWithLogitsLoss(), train_ds, ptbxl_val_ds, 
                             ptbxl_test_ds, args.res_path, cuda_id=args.device, return_model=True)
         model = trainer.train(args.num_epochs)
         # Model fine-tuning
+        orig_train_ds = ECGDataset(args.origin_data_path, args.dataset_name, label2id, selected_classes[args.dataset_name], type="classify", option='train', proportion=i)
+        orig_val_ds = ECGDataset(args.origin_data_path, args.dataset_name, label2id, selected_classes[args.dataset_name], type="classify", option='val')
+        orig_test_ds = ECGDataset(args.origin_data_path, args.dataset_name, label2id, selected_classes[args.dataset_name], type="classify", option='test')
+
         model[-1][-1] = nn.Linear(512, len(label2id_tune))
         opt = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
         trainer = CNN1dTrainer(args.model_type + f'_fine_tuned_{args.dataset_name}' + str(i), label2id_tune, model, opt, torch.nn.BCEWithLogitsLoss(), orig_train_ds, orig_val_ds, 
