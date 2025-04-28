@@ -6,7 +6,7 @@ import torch
 import numpy as np
 import os
 from tqdm import tqdm
-
+import pickle
 import torch.distributed as dist
 from torch.multiprocessing import Process
 
@@ -44,9 +44,12 @@ def main(args):
     logging = utils.Logger(args.global_rank, args.save)
     writer = utils.Writer(args.global_rank, args.save)
  
+    with open(os.path.join(args.data_dir, "label2id.pickle"), "rb") as f:
+        label2id = pickle.load(f)
+    selected_classes = ['426783006', '39732003', '164873001', '164889003', '427084000', '270492004', '426177001', '164934002']
 
-    train_dataset = ECGDataset(args.data_dir, "ptb-xl", option="train")
-    valid_dataset = ECGDataset(args.data_dir, "ptb-xl", option="val")
+    train_dataset = ECGDataset(args.data_dir, "ptb-xl", label2id, selected_classes, option="train")
+    valid_dataset = ECGDataset(args.data_dir, "ptb-xl", label2id, selected_classes, option="val")
 
     train_queue = DataLoader(train_dataset, shuffle=True, pin_memory=True,
                               batch_size=args.batch_size, num_workers=4, drop_last=False)
@@ -60,7 +63,7 @@ def main(args):
 
     arch_instance = utils.get_arch_cells(args.arch_instance)
 
-    model = AutoEncoder(args, writer, arch_instance, num_classes = len(train_dataset.label2id))
+    model = AutoEncoder(args, writer, arch_instance, num_classes = len(selected_classes))
     model = model.cuda()
 
     logging.info('args = %s', args)
