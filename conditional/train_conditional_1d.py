@@ -16,11 +16,21 @@ import utils
 import sys
 sys.path.insert(0, '..')
 
-from data.PTBXLToDataset import CVConditional
+from thirdparty.adamax import Adamax
+
+from data.data_modules import ECGDataset
 from torch.utils.data import DataLoader
 
 from visualize import plot_ecg, compare_ecgs
 
+def init_processes(rank, size, fn, args):
+    """ Initialize the distributed environment. """
+    os.environ['MASTER_ADDR'] = args.master_address
+    os.environ['MASTER_PORT'] = args.master_port  # '6020'
+    torch.cuda.set_device(args.local_rank)
+    dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=size)
+    fn(args)
+    cleanup()
 
 def main(args):
     # ensures that weight initializations are all the same
@@ -33,33 +43,13 @@ def main(args):
 
     logging = utils.Logger(args.global_rank, args.save)
     writer = utils.Writer(args.global_rank, args.save)
+ 
 
-    logging.info('working with {} channels!'.format(args.num_input_channels))
-    
-    if args.sample:
-        stype = "gan_sample"
-    elif args.equal:
-        stype = "gan_equal"
-    else:
-        stype = "gan_no_sample"
+    train_dataset = ECGDataset(args.data_dir, "ptb-xl", option="train")
+    valid_dataset = ECGDataset(args.data_dir, "ptb-xl", option="val")
 
-
-    if args.ptbxl_path == '':
-        ptbxl_path = None
-    else:
-        ptbxl_path = args.ptbxl_path
-        
-
-    train_dataset = CVConditional(args.class_name, args.input_size // 10, args.fold_idx, args.data_dir, type=stype, option="train",smooth=args.smooth, filter=args.filter, ptbxl_path=ptbxl_path)
-    valid_dataset = CVConditional(args.class_name, args.input_size // 10, args.fold_idx, args.data_dir, type=stype, option="val",smooth=args.smooth, filter=args.filter, ptbxl_path=ptbxl_path) 
-
-        
-    print(len(train_dataset), train_dataset.type, train_dataset.labels.sum(), train_dataset.labels.shape[0] - train_dataset.labels.sum())
-    
     train_queue = DataLoader(train_dataset, shuffle=True, pin_memory=True,
                               batch_size=args.batch_size, num_workers=4, drop_last=False)
-
-    
     valid_queue = DataLoader(valid_dataset, shuffle=False, pin_memory=True,
                             batch_size=args.batch_size, num_workers=4, drop_last=False)
 
@@ -70,7 +60,7 @@ def main(args):
 
     arch_instance = utils.get_arch_cells(args.arch_instance)
 
-    model = AutoEncoder(args, writer, arch_instance)
+    model = AutoEncoder(args, writer, arch_instance, num_classes = len(train_dataset.label2id))
     model = model.cuda()
 
     logging.info('args = %s', args)
@@ -78,10 +68,12 @@ def main(args):
     logging.info('groups per scale: %s, total_groups: %d', model.groups_per_scale, sum(model.groups_per_scale))
 
     if args.fast_adamax:
-        import pdb 
-        pdb.set_trace()
-    cnn_optimizer = torch.optim.Adamax(model.parameters(), args.learning_rate,
-                                        weight_decay=args.weight_decay, eps=1e-3)
+        # Fast adamax has the same functionality as torch.optim.Adamax, except it is faster.
+        cnn_optimizer = Adamax(model.parameters(), args.learning_rate,
+                               weight_decay=args.weight_decay, eps=1e-3)
+    else:
+        cnn_optimizer = torch.optim.Adamax(model.parameters(), args.learning_rate,
+                                           weight_decay=args.weight_decay, eps=1e-3)
 
     cnn_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         cnn_optimizer, float(args.epochs - args.warmup_epochs - 1), eta_min=args.learning_rate_min)
@@ -118,9 +110,8 @@ def main(args):
         eval_freq = 5
         if epoch % eval_freq == 0 or epoch == (args.epochs - 1):
             with torch.no_grad():
-                num_samples = 1
                 for t in [0.2, 0.5, 0.9]:
-                    logits = model.sample(0, num_samples, t)
+                    logits = model.sample(torch.tensor([[0., 1., 0., 0., 0., 0., 0., 0., 0.]]).cuda(), t)
                     output = model.decoder_output(logits)
                     output_img = output.mean if isinstance(output, torch.distributions.bernoulli.Bernoulli) else output.sample(t)
                     output_tiled = plot_ecg(output_img.cpu().squeeze(), args.num_input_channels)
@@ -142,17 +133,6 @@ def main(args):
                             'optimizer': cnn_optimizer.state_dict(), 'global_step': global_step,
                             'args': args, 'arch_instance': arch_instance, 'scheduler': cnn_scheduler.state_dict(),
                            }, checkpoint_file)
-                print('model saved!')
-        if epoch == 350:
-            if args.global_rank == 0:
-                logging.info('saving the model.')
-                chekpoint_file_350 = os.path.join(args.save, 'checkpoint_350.pt')
-                torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict(),
-                            'optimizer': cnn_optimizer.state_dict(), 'global_step': global_step,
-                            'args': args, 'arch_instance': arch_instance, 'scheduler': cnn_scheduler.state_dict(),
-                           }, chekpoint_file_350)
-                print('model saved!')
-
     # Final validation
     valid_neg_log_p, valid_nelbo = test(valid_queue, model, num_samples=100, args=args, logging=logging, writer=writer, global_step=global_step, channels=args.num_input_channels)
     logging.info('final valid nelbo %f', valid_nelbo)
@@ -163,7 +143,7 @@ def main(args):
 
 
 def train(train_queue, model, cnn_optimizer, global_step, warmup_iters, writer, logging, channels):
-    # коэффициент, который даёт больший вас kl-дивергенции малым (более глубоким) группам
+    # A coefficient that gives greater KL-divergence weight to small (deeper) groups
     alpha_i = utils.kl_balancer_coeff(num_scales=model.num_latent_scales,
                                       groups_per_scale=model.groups_per_scale, fun='square')
     nelbo = utils.AvgrageMeter()
@@ -174,6 +154,7 @@ def train(train_queue, model, cnn_optimizer, global_step, warmup_iters, writer, 
     for x in tqdm(train_queue):
         image, label = x
         image = image.double().cuda()
+        label = label.cuda()
 
         # warm-up lr
         if global_step < warmup_iters:
@@ -184,7 +165,7 @@ def train(train_queue, model, cnn_optimizer, global_step, warmup_iters, writer, 
         cnn_optimizer.zero_grad()
         logits, log_q, log_p, kl_all, kl_diag = model(image, label.long())
         output = model.decoder_output(logits)
-        # коэффициент в зависимости от шага обучения
+        # Coefficient dependent on the learning rate
         kl_coeff = utils.kl_coeff(global_step, args.kl_anneal_portion * args.num_total_iter,
                                   args.kl_const_portion * args.num_total_iter, args.kl_const_coeff)
 
@@ -329,13 +310,13 @@ if __name__ == '__main__':
                         help='location of the data')
     parser.add_argument('--batch_size', type=int, default=64,
                         help='batch size per GPU')
-    parser.add_argument('--learning_rate', type=float, default=1e-3,  # 4e-3, 1e-4
+    parser.add_argument('--learning_rate', type=float, default=1e-3,
                         help='init learning rate')
-    parser.add_argument('--learning_rate_min', type=float, default=5e-4,  # 1e-2, 4e-4, 4e-3, 5e-5
+    parser.add_argument('--learning_rate_min', type=float, default=5e-4,
                         help='min learning rate')
     parser.add_argument('--weight_decay', type=float, default=3e-4,
                         help='weight decay')
-    parser.add_argument('--weight_decay_norm', type=float, default=0.0,  # 1e-2
+    parser.add_argument('--weight_decay_norm', type=float, default=1e-2,
                         help='The lambda parameter for spectral regularization.')
     parser.add_argument('--weight_decay_norm_init', type=float, default=10.,
                         help='The initial lambda parameter')
@@ -344,7 +325,7 @@ if __name__ == '__main__':
                              '--weight_decay_norm_init to --weight_decay_norm.')
     parser.add_argument('--epochs', type=int, default=200,
                         help='num of training epochs')
-    parser.add_argument('--percent_epochs', type=int, default=5,  # 2%
+    parser.add_argument('--percent_epochs', type=int, default=1,
                         help='fraction of training epochs in which lr is warmed up')
     parser.add_argument('--fast_adamax', action='store_true', default=False,
                         help='This flag enables using our optimized adamax.')
@@ -418,36 +399,17 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=1,
                         help='seed used for initialization')
     # Debug
-    parser.add_argument('--input_size', type=int, default=4096,
-                    help='Image input size'),
+    parser.add_argument('--input_size', type=int, default=5000,
+                    help='Signal input size'),
     # ECG
     parser.add_argument('--num_input_channels', type=int, default=1,
                     help='Number of ECG leads')
-    parser.add_argument('--class_name', type=str, required=True,
-                    help='Class name')
-    parser.add_argument('--fold_idx', type=int, default=-1,
-                    help='fold id in kfold cross-val')
     parser.add_argument('--name', type=str, required=True,
-                    help='exp name')
-    parser.add_argument('--smooth', action='store_true', default=False,
-                    help='use smoothing?')
-    parser.add_argument('--filter', action='store_true', default=False,
-                    help='use filtering?')
-    parser.add_argument('--sample', action='store_true', default=False,
-                    help='use 0.5 sampling?')
-    parser.add_argument('--equal', action='store_true', default=False,
-                    help='use equal distribution?')
-    parser.add_argument('--ptbxl_path', type=str, default='',
-                    help='path to PTB-XL dataset')
+                    help='experiment name')
     parser.add_argument('--focal', action='store_true', default=False,
                     help='use focal loss in ce?')
     args = parser.parse_args()
-    if args.fold_idx == -1:
-        appendix = ""
-    else:
-        appendix = "_fold_" + str(args.fold_idx)
-
-    args.save = args.root + args.name + '_' + str(args.num_input_channels)+'-' + "_".join(args.class_name.split()) + appendix
+    args.save = args.root + args.name
     utils.create_exp_dir(args.save)
 
     size = args.num_process_per_node

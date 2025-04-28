@@ -18,10 +18,11 @@ OPS = OrderedDict([
     ('res_bnelu', lambda Cin, Cout, stride: BNELUConv(Cin, Cout, 3, stride, 1)),
     ('res_bnswish', lambda Cin, Cout, stride: BNSwishConv(Cin, Cout, 3, stride, 1)),
     ('res_bnswish5', lambda Cin, Cout, stride: BNSwishConv(Cin, Cout, 3, stride, 2, 2)),
-    ('mconv_e6k5g0', lambda Cin, Cout, stride: InvertedResidual(Cin, Cout, stride, ex=6, dil=1, k=5, g=0)),
-    ('mconv_e3k5g0', lambda Cin, Cout, stride: InvertedResidual(Cin, Cout, stride, ex=3, dil=1, k=5, g=0)),
-    ('mconv_e3k5g8', lambda Cin, Cout, stride: InvertedResidual(Cin, Cout, stride, ex=3, dil=1, k=5, g=8)),
-    ('mconv_e6k11g0', lambda Cin, Cout, stride: InvertedResidual(Cin, Cout, stride, ex=6, dil=1, k=11, g=0)),
+    # We did not implement these functions to cNVAE-ECG
+    # ('mconv_e6k5g0', lambda Cin, Cout, stride: InvertedResidual(Cin, Cout, stride, ex=6, dil=1, k=5, g=0)),
+    # ('mconv_e3k5g0', lambda Cin, Cout, stride: InvertedResidual(Cin, Cout, stride, ex=3, dil=1, k=5, g=0)),
+    # ('mconv_e3k5g8', lambda Cin, Cout, stride: InvertedResidual(Cin, Cout, stride, ex=3, dil=1, k=5, g=8)),
+    # ('mconv_e6k11g0', lambda Cin, Cout, stride: InvertedResidual(Cin, Cout, stride, ex=6, dil=1, k=11, g=0)),
 ])
 
 
@@ -171,7 +172,11 @@ class BNELUConv(nn.Module):
         x = self.bn(x)
         out = F.elu(x)
         if self.upsample:
-            out = F.interpolate(out, scale_factor=2, mode='nearest')
+            # Fix to work with the size = 5000
+            if x.shape[-1] < 500:
+                out = F.interpolate(out, scale_factor=2, mode='nearest')[:, :, :-1]
+            else:
+                out = F.interpolate(out, scale_factor=2, mode='nearest')
         out = self.conv_0(out)
         return out
 
@@ -210,7 +215,8 @@ class FactorizedReduce(nn.Module):
     def forward(self, x):
         out = act(x)
         conv1 = self.conv_1(out)
-        conv2 = self.conv_2(out[:, :, 1:])
+        # Fix to work with the size = 5000
+        conv2 = self.conv_2(out) #[:, :, 1:])
         out = torch.cat([conv1, conv2], dim=1)
         return out
 
@@ -221,7 +227,11 @@ class UpSample(nn.Module):
         pass
 
     def forward(self, x):
-        return F.interpolate(x, scale_factor=2, mode='linear', align_corners=True)
+        # Fix to work with the size = 5000
+        if x.shape[-1] < 500:
+            return F.interpolate(x, scale_factor=2, mode='linear', align_corners=True)[:, :, :-1]
+        else:
+            return F.interpolate(x, scale_factor=2, mode='linear', align_corners=True)
 
 
 class EncCombinerCell(nn.Module):
@@ -233,6 +243,15 @@ class EncCombinerCell(nn.Module):
 
     def forward(self, x1, x2):
         x2 = self.conv(x2)
+        # Fix to work with the size = 5000
+        if x1.size(2) != x2.size(2):
+            # Pad the smaller tensor to match the larger one's size
+            if x1.size(2) < x2.size(2):
+                pad_size = x2.size(2) - x1.size(2)
+                x1 = F.pad(x1, (0, pad_size), mode='replicate')
+            else:
+                pad_size = x1.size(2) - x2.size(2)
+                x2 = F.pad(x2, (0, pad_size), mode='replicate')
         out = x1 + x2
         return out
 
@@ -246,6 +265,15 @@ class EncCombinerCell1d(nn.Module):
 
     def forward(self, x1, x2):
         x2 = self.conv(x2)
+        # Fix to work with the size = 5000
+        if x1.size(2) != x2.size(2):
+            # Pad the smaller tensor to match the larger one's size
+            if x1.size(2) < x2.size(2):
+                pad_size = x2.size(2) - x1.size(2)
+                x1 = F.pad(x1, (0, pad_size), mode='replicate')
+            else:
+                pad_size = x1.size(2) - x2.size(2)
+                x2 = F.pad(x2, (0, pad_size), mode='replicate')
         out = x1 + x2
         return out
 
@@ -258,6 +286,15 @@ class DecCombinerCell(nn.Module):
         self.conv = Conv1D(Cin1 + Cin2, Cout, kernel_size=1, stride=1, padding=0, bias=True)
 
     def forward(self, x1, x2):
+        # Fix to work with the size = 5000
+        if x1.size(2) != x2.size(2):
+            # Pad the smaller tensor to match the larger one's size
+            if x1.size(2) < x2.size(2):
+                pad_size = x2.size(2) - x1.size(2)
+                x1 = F.pad(x1, (0, pad_size), mode='replicate')
+            else:
+                pad_size = x1.size(2) - x2.size(2)
+                x2 = F.pad(x2, (0, pad_size), mode='replicate')
         out = torch.cat([x1, x2], dim=1)
         out = self.conv(out)
         return out

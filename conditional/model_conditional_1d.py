@@ -44,8 +44,10 @@ class Cell(nn.Module):
 
 
 class AutoEncoder(nn.Module):
-    def __init__(self, args, writer, arch_instance):
+    def __init__(self, args, writer, arch_instance, num_classes):
         super(AutoEncoder, self).__init__()
+        
+        self.num_classes = num_classes
         self.focal = args.focal
         self.writer = writer
         self.arch_instance = arch_instance
@@ -85,9 +87,7 @@ class AutoEncoder(nn.Module):
         spatial_scaling = 2 ** (self.num_preprocess_blocks + self.num_latent_scales - 1)
         prior_ftr0_size = (int(c_scaling * self.num_channels_dec), self.input_size // spatial_scaling)
         
-        
-        
-        self.prior_ftr0 = nn.Parameter(torch.rand(size=(2,)+prior_ftr0_size), requires_grad=True) # For zeros and ones
+        self.prior_ftr0 = nn.Parameter(torch.rand(size=(self.num_classes,)+prior_ftr0_size), requires_grad=True) # For classes
         self.z0_size = [self.num_latent_per_group, self.input_size // spatial_scaling]
 
         self.stem = self.init_stem()
@@ -114,6 +114,8 @@ class AutoEncoder(nn.Module):
         self.post_process, mult = self.init_post_process(mult)
 
         self.image_conditional = self.init_image_conditional(mult)
+
+        self.embed_transform = nn.Sequential(nn.Conv1d(768, 12, kernel_size=1), nn.AdaptiveAvgPool1d(1))
 
         # collect all norm params in Conv1D and gamma param in batchnorm
         self.all_log_norm = []
@@ -281,7 +283,11 @@ class AutoEncoder(nn.Module):
                              Conv1D(C_in, C_out, 3, padding=1, bias=True))
 
     def forward(self, x, idx):
+
         s = self.stem(2 * x - 1.0)
+        embed = (self.prior_ftr0 * idx.cuda().unsqueeze(2).unsqueeze(3)).sum(axis=1)
+        embed = self.embed_transform(embed)
+        s += embed
         # perform pre-processing
         for cell in self.pre_process:
             s = cell(s)
@@ -326,9 +332,8 @@ class AutoEncoder(nn.Module):
         all_log_p = [log_p_conv]
 
         idx_dec = 0
-        s = self.prior_ftr0[idx]
-
-        
+        s = (self.prior_ftr0 * idx.cuda().unsqueeze(2).unsqueeze(3)).sum(axis=1)
+ 
         for cell in self.dec_tower:
             if cell.cell_type == 'combiner_dec':
                 if idx_dec > 0:
@@ -368,7 +373,6 @@ class AutoEncoder(nn.Module):
             s = self.stem_decoder(z)
 
         for cell in self.post_process:
-            # pdb.set_trace()
             s = cell(s)
 
         logits = self.image_conditional(s)
@@ -391,14 +395,15 @@ class AutoEncoder(nn.Module):
 
         return logits, log_q, log_p, kl_all, kl_diag
 
-    def sample(self, idx, num_samples, t):
+    def sample(self, classes, t):
         scale_ind = 0
-        z0_size = [num_samples] + self.z0_size
+        z0_size = [classes.shape[0]] + self.z0_size
         dist = Normal(mu=torch.zeros(z0_size).cuda(), log_sigma=torch.zeros(z0_size).cuda(), temp=t)
         z, _ = dist.sample()
 
         idx_dec = 0
-        s = self.prior_ftr0[idx].unsqueeze(0)
+        s = (self.prior_ftr0 * classes.unsqueeze(2).unsqueeze(3)).sum(axis=1)
+        
         batch_size = z.size(0)
         s = s.expand(batch_size, -1, -1)
         for cell in self.dec_tower:
@@ -428,15 +433,7 @@ class AutoEncoder(nn.Module):
         return logits
 
     def decoder_output(self, logits):
-        if self.num_mix_output == 1:
-            return NormalDecoder(logits, num_bits=self.num_bits)
-        else:
-            if self.num_input_channels == 3:
-                return DiscMixLogistic1D(logits, self.num_mix_output, num_bits=self.num_bits)     
-            elif self.num_input_channels == 8:
-                return DiscMixEightLogistic1D(logits, self.num_mix_output, num_bits=self.num_bits, focal=self.focal)     
-            else:
-                return NotImplementedError
+        return DiscMixEightLogistic1D(logits, self.num_mix_output, num_bits=self.num_bits, focal=self.focal)     
             
     def spectral_norm_parallel(self):
         """ This method computes spectral normalization for all conv layers in parallel. This method should be called
