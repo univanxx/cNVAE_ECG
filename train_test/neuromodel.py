@@ -1,10 +1,7 @@
 import numpy as np
-import random
-
 import torch
 torch.set_default_dtype(torch.float32)
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from sklearn.metrics import roc_auc_score
@@ -13,62 +10,20 @@ from utils import find_threshold
 import os
 from tqdm import tqdm
 import pickle
-
-
-
-##### Multihead 1d-CNN model for the 1-st and 2-nd baselines #####
-class CNN1dMultihead(nn.Module):
-    def __init__(self, k=1, num_ch=12):
-        super().__init__()
-        """
-        Args:
-            num_ch: number of channels of an ecg-signal
-            k: number of classes
-        """
-        self.layer1 = nn.Sequential(
-            nn.Conv1d(num_ch, 24, 10, stride=2),
-            nn.BatchNorm1d(24),
-            nn.ReLU(),
-            nn.Conv1d(24, 48, 10, stride=2),
-            nn.BatchNorm1d(48),
-            nn.ReLU(),
-            nn.MaxPool1d(6, 2)
-        )
-        self.layer2 = nn.Sequential(
-            nn.Conv1d(48, 64, 10, stride=2),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Conv1d(64, 128, 10, stride=2),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.AdaptiveMaxPool1d(10)
-        )
-        self.classification_layers = nn.ModuleList([nn.Sequential(
-            nn.Linear(128*10, 120),
-            nn.ReLU(),
-            nn.Linear(120, 160),
-            nn.ReLU(),
-            nn.Linear(160, 1)
-        ) for i in range(k)])
-
-    def forward(self, x):
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = torch.flatten(x, 1)
-        preds = torch.stack([torch.squeeze(classification_layer(x)) for classification_layer in self.classification_layers])
-        return torch.swapaxes(preds, 0, 1)
     
     
 ##### Trainer for 1d-CNN model #####
 class CNN1dTrainer:
-    def __init__(self, class_name, 
+    def __init__(self, class_name, label2id,
                  model, optimizer, loss,
                  train_dataset, val_dataset, test_dataset, model_path,
-                 batch_size=128, cuda_id=1):
+                 batch_size=128, cuda_id=1, return_model=False):
         
         self.model = model
         self.optimizer = optimizer
         self.loss = loss
+        self.return_model = return_model
+        self.id2label = {v:k for k,v in label2id.items()}
         
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
@@ -125,73 +80,89 @@ class CNN1dTrainer:
                 self.writer.add_scalar("Train Loss", loss.item(), global_step=self.global_step)
                 self.global_step += 1
 
-            train_logits = np.concatenate(train_logits)
             train_gts = np.concatenate(train_gts)
-            train_logits = train_logits[:,None]
-            train_gts = train_gts[:,None]
+            train_logits = train_logits
+            train_gts = train_gts
 
-            res_ap = []
-            for i in range(train_logits.shape[1]):
-                res_ap.append(roc_auc_score(train_gts[:,i], train_logits[:,i]))
-            self.writer.add_scalar("Train AP/{}".format(self.class_name), np.mean(res_ap), global_step=epoch)
+            preds = torch.sigmoid(torch.cat(train_logits)).numpy()
+            res_metric = []
 
+            if len(train_gts.shape) == 1:
+                train_gts = np.expand_dims(train_gts, -1)
+                preds = np.expand_dims(preds, -1)
+            for i in range(train_gts.shape[1]):
+                res_metric.append(roc_auc_score(train_gts[:,i], preds[:,i]))
+            self.writer.add_scalar("Train AP/{}".format(self.class_name), np.mean(res_metric), global_step=epoch)
+
+            val_logits = []
+            val_gts = []
             model.eval()
             with torch.no_grad():
                 for batch in self.val_loader:
                     image, label = batch
                     image = image.to(self.device)
                     label = label.to(self.device)
-                    logits = model(image).cpu().squeeze()
+                    logits = model(image).cpu()
                     gts = label.cpu()
+                    val_logits.append(logits)
+                    val_gts.append(gts)
 
-                logits = logits[:,None]
-                gts = gts[:,None]
+                gts = np.concatenate(val_gts)
 
-                res_ap = []
-                for i in range(logits.shape[1]):
-                    res_ap.append(roc_auc_score(gts[:,i], logits[:,i]))
-                mean_val = np.mean(res_ap)
-
+                preds = torch.sigmoid(torch.cat(val_logits)).numpy()
+                res_metric = []
+                if len(gts.shape) == 1:
+                    gts = np.expand_dims(gts, -1)
+                for i in range(gts.shape[1]):
+                    res_metric.append(roc_auc_score(gts[:,i], preds[:,i]))
+                mean_val = np.mean(res_metric)
                 if mean_val > best_val:
                     self.save_checkpoint(self.model_path + "/models" + "/" +self.class_name+"/best_checkpoint.pth")
                     best_val = mean_val
                     self.result_output['threshold'] = find_threshold(gts, logits)
                     
-                    mean_test = self.test(self.model, self.test_dataset, epoch)
+                    best_test = self.test(self.model, self.test_dataset, epoch)
                     self.writer.add_scalar("Val AP/{}".format(self.class_name), mean_val, global_step=epoch)
-                    best_test = mean_test
                 else:
-                    mean_test = self.test(self.model, self.test_dataset, epoch)
+                    best_test = self.test(self.model, self.test_dataset, epoch)
                     self.writer.add_scalar("Val AP/{}".format(self.class_name), mean_val, global_step=epoch)
 
-        self.writer.add_text("Final test metric/{}".format(self.class_name), str(round(mean_test, 4)))
+        self.writer.add_text("Final test metric/{}".format(self.class_name), str(round(np.mean(list(best_test.values())), 4)))
         with open(self.model_path + "/models" + "/" +self.class_name+"/log.pickle", 'wb') as handle:
             pickle.dump(self.result_output, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        return round(best_test, 4)
+        if self.return_model:
+            return self.model
+        else:
+            return best_test
 
        
     def test(self, model, test_dataset, epoch):
         model.eval()
         
-        test_loader = DataLoader(test_dataset, shuffle=True, pin_memory=True, batch_size=len(test_dataset), num_workers=8)
+        test_loader = DataLoader(test_dataset, shuffle=False, pin_memory=True, batch_size=self.batch_size, num_workers=8)
+        test_logits = []
+        test_gts = []
         for batch in test_loader:
             image, label = batch
             image = image.to(self.device)
             label = label.to(self.device)
             with torch.no_grad():
-                logits = model(image).cpu().detach().squeeze()
+                logits = model(image).cpu()
                 gts = label.cpu()
-            
-        logits = logits[:,None]
-        gts = gts[:,None]
+                test_logits.append(logits)
+                test_gts.append(gts)
 
-        preds = []
-        for i in range(logits.shape[1]):
-            preds.append((logits[:,i] > self.result_output['threshold'][i])*1)
+        preds = torch.sigmoid(torch.cat(test_logits)).numpy()
+        gts = np.concatenate(test_gts)
 
-        res_f1 = []
-        for i in range(logits.shape[1]):
-            res_f1.append(roc_auc_score(gts[:,i], logits[:,i]))
-        mean_test = np.mean(res_f1)
-        self.writer.add_scalar("Test ROC-AUC/{}".format(self.class_name), mean_test, global_step=epoch)
-        return mean_test
+        res_metric = []
+        res_dict = {}
+        if len(gts.shape) == 1:
+            gts = np.expand_dims(gts, -1)
+
+        for i in range(gts.shape[1]):
+            metric_val = roc_auc_score(gts[:,i], preds[:,i])
+            res_metric.append(metric_val)
+            res_dict[self.id2label[i]] = metric_val
+        self.writer.add_scalar("Test ROC-AUC/{}".format(self.class_name), np.mean(res_metric), global_step=epoch)
+        return res_dict

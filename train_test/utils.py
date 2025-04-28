@@ -1,14 +1,14 @@
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import roc_auc_score
 import numpy as np
 
 
-def find_threshold(trues, logits, eps=1e-9, beta = 2):
-    metric = []
-    for thr_i in logits:
-        preds = logits > thr_i
-        tn, fp, fn, tp = confusion_matrix(trues, preds).ravel()
-        g_beta = tp / (tp+fp+beta*fn + eps)
-        precision, recall = tp/(tp+fp + eps), tp/(tp+fn + eps)
-        f1_beta = (1+beta*beta)*(precision+recall) / (beta*beta*precision + recall + eps)
-        metric.append(f1_beta / g_beta + eps)
-    return logits[np.argmax(metric)]
+def find_threshold(trues, logits):
+    thrshs = []
+    for class_i in range(trues.shape[1]):
+        metric = []
+        for thr_i in logits[:,class_i]:
+            preds = logits[:,class_i] > thr_i
+            auc = roc_auc_score(trues[:, class_i], preds)
+            metric.append(auc)
+        thrshs.append(logits[np.argmax(metric), class_i])
+    return thrshs
